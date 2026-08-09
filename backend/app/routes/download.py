@@ -68,15 +68,14 @@ class ThumbnailReq(BaseModel):
 
 @router.post("/video/info")
 async def video_info(req: DownloadReq):
-    try:
-        info = fetch_info(req.url)
-    except Exception as e:
-        raise HTTPException(400, f"Failed to analyze video: {str(e)[:200]}")
+    info, err = fetch_info(req.url)
 
     if not info:
+        # Surface the REAL yt-dlp error so we can diagnose cloud blocking
+        detail = err or "Unknown error"
         raise HTTPException(
             400,
-            "Could not fetch video info. The video may be private, age-restricted, region-locked, or the URL is invalid."
+            f"Could not fetch video info: {detail}"
         )
 
     formats = info.get("formats", [])

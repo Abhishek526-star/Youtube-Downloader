@@ -198,6 +198,16 @@ def _common_opts(output_dir: str, retries: int, job_id: str) -> dict:
         "windowsfilenames": True,
         "quiet": True,
         "no_warnings": True,
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+        },
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["ios", "web", "mweb"],
+            }
+        },
+        "socket_timeout": 30,
     }
 
 
@@ -248,10 +258,32 @@ def opts_keypad(output_dir, retries, job_id):
     return opts
 
 
-def fetch_info(url: str) -> Optional[dict]:
+def fetch_info(url: str) -> tuple[Optional[dict], Optional[str]]:
+    """
+    Fetch metadata. Returns (info_dict, None) on success, or (None, error_message) on failure.
+    Uses cloud-friendly settings to avoid YouTube bot blocks.
+    """
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+        },
+        "extractor_args": {
+            "youtube": {"player_client": ["ios", "web", "mweb"]},
+        },
+        "socket_timeout": 30,
+        "retries": 5,
+    }
     try:
-        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
-            return ydl.extract_info(url, download=False)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            return (info, None)
+    except yt_dlp.utils.DownloadError as e:
+        err = str(e).split("ERROR:")[-1].strip()[:300] if "ERROR:" in str(e) else str(e)[:300]
+        logger.error(f"Info fetch DownloadError: {err}")
+        return (None, err)
     except Exception as e:
         logger.error(f"Info fetch failed: {e}")
-        return None
+        return (None, str(e)[:300])
