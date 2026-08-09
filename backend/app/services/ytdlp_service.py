@@ -202,9 +202,10 @@ def _common_opts(output_dir: str, retries: int, job_id: str) -> dict:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9",
         },
-        "extractor_args": {
+          "extractor_args": {
             "youtube": {
-                "player_client": ["ios", "web", "mweb"],
+                # Try TV embedded client first — often bypasses bot wall without cookies
+                "player_client": ["tv_embedded", "ios", "android", "web"],
             }
         },
         "socket_timeout": 30,
@@ -270,8 +271,11 @@ def fetch_info(url: str) -> tuple[Optional[dict], Optional[str]]:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9",
         },
-        "extractor_args": {
-            "youtube": {"player_client": ["ios", "web", "mweb"]},
+                "extractor_args": {
+            "youtube": {
+                # Try TV embedded client first — often bypasses bot wall without cookies
+                "player_client": ["tv_embedded", "ios", "android", "web"],
+            }
         },
         "socket_timeout": 30,
         "retries": 5,
