@@ -1,6 +1,5 @@
 const API = import.meta.env.VITE_API_URL;
 
-// Helper: throw a real Error with the backend's message on non-2xx responses
 async function handleResponse(res) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -10,25 +9,47 @@ async function handleResponse(res) {
   return data;
 }
 
-export const analyzeVideo = (url) =>
-  fetch(`${API}/api/video/info`, {
+// ✅ Upload cookies file → returns a session ID
+export const uploadCookies = (file) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return fetch(`${API}/api/cookies/upload`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url: url.trim(), mode: 'best' })
+    body: formData,
   }).then(handleResponse);
+};
 
-export const startDownload = (params) =>
-  fetch(`${API}/api/download`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...params, url: params.url.trim() }),
-  }).then(handleResponse);
-
-export const cancelDownload = (jobId) =>
-  fetch(`${API}/api/download/${jobId}/cancel`, { method: 'POST' })
+export const clearCookies = (sessionId) =>
+  fetch(`${API}/api/cookies/clear/${sessionId}`, { method: 'POST' })
     .then(handleResponse);
 
-// Always requests TRUE ORIGINAL quality (maxresdefault) with automatic fallback
+// ✅ Analyze now accepts an optional cookie session
+export const analyzeVideo = (url, cookieSession = null) => {
+  const body = { url: url.trim() };
+  if (cookieSession) body.cookie_session = cookieSession;
+  return fetch(`${API}/api/video/info`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(handleResponse);
+};
+
+// ✅ Download uses multipart form so cookies session can be passed
+export const startDownload = (params) => {
+  const formData = new FormData();
+  formData.append('url', params.url.trim());
+  formData.append('mode', params.mode);
+  if (params.resolution) formData.append('resolution', params.resolution);
+  if (params.cookieSession) formData.append('cookie_session', params.cookieSession);
+  return fetch(`${API}/api/download`, {
+    method: 'POST',
+    body: formData,
+  }).then(handleResponse);
+};
+
+export const cancelDownload = (jobId) =>
+  fetch(`${API}/api/download/${jobId}/cancel`, { method: 'POST' }).then(handleResponse);
+
 export const downloadThumbnail = (videoUrl, thumbnailUrl, originalQuality = true) =>
   fetch(`${API}/api/download/thumbnail`, {
     method: 'POST',

@@ -4,10 +4,12 @@ import {
   Ban,
   Calendar,
   Check,
+  CheckCircle,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
   Clock3,
+  Cookie,
   Copy,
   Download,
   Eye,
@@ -22,7 +24,6 @@ import {
   Info,
   Link2,
   Loader2,
-  Menu,
   Music2,
   Play,
   Search,
@@ -31,6 +32,8 @@ import {
   Smartphone,
   Sparkles,
   Tag,
+  Trash2,
+  Upload,
   User,
   Video,
   Wifi,
@@ -45,6 +48,8 @@ import {
   subscribeProgress,
   cancelDownload,
   downloadThumbnail,
+  uploadCookies,
+  clearCookies,
 } from './services/api';
 
 const FORMAT_OPTIONS = [
@@ -153,8 +158,16 @@ export default function App() {
 
   const [copiedField, setCopiedField] = useState(null);
 
+  // ✅ Cookie state
+  const [useCookies, setUseCookies] = useState(false);
+  const [cookieSession, setCookieSession] = useState(null);
+  const [cookieFileName, setCookieFileName] = useState(null);
+  const [cookieUploading, setCookieUploading] = useState(false);
+  const [showCookieHelp, setShowCookieHelp] = useState(false);
+
   const iframeRef = useRef(null);
   const inputRef = useRef(null);
+  const cookieInputRef = useRef(null);
 
   useEffect(() => {
     setHistory(safeReadStorage(RECENT_KEY, []));
@@ -208,6 +221,35 @@ export default function App() {
     }
   }, [progress?.status, job, downloadUrl, settings.autoDownload, info, mode, resolution]);
 
+  // ✅ Cookie upload handler
+  const handleCookieUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError(null);
+    setCookieUploading(true);
+    try {
+      const res = await uploadCookies(file);
+      setCookieSession(res.cookie_session);
+      setCookieFileName(file.name);
+      setUseCookies(true);
+    } catch (err) {
+      setError(err.message || 'Failed to upload cookies');
+      setUseCookies(false);
+    }
+    setCookieUploading(false);
+    // Reset file input so same file can be re-selected
+    if (cookieInputRef.current) cookieInputRef.current.value = '';
+  };
+
+  const handleClearCookies = async () => {
+    if (cookieSession) {
+      try { await clearCookies(cookieSession); } catch {}
+    }
+    setCookieSession(null);
+    setCookieFileName(null);
+    setUseCookies(false);
+  };
+
   const isActive =
     progress &&
     !['completed', 'failed', 'cancelled'].includes(progress.status);
@@ -249,14 +291,20 @@ export default function App() {
     setProgress(null);
 
     try {
-      const data = await analyzeVideo(url.trim());
+      const data = await analyzeVideo(url.trim(), useCookies ? cookieSession : null);
       setInfo(data);
 
       if (data.available_resolutions?.length) {
         setResolution(data.available_resolutions[0]);
       }
-    } catch {
-      setError('Invalid YouTube URL or the video is restricted.');
+      // Cookies are one-time-use; clear session after analyze consumed them
+      if (useCookies && cookieSession) {
+        setCookieSession(null);
+        setCookieFileName(null);
+        setUseCookies(false);
+      }
+    } catch (err) {
+      setError(err.message || 'Invalid YouTube URL or the video is restricted.');
     } finally {
       setLoading(false);
     }
@@ -271,7 +319,7 @@ export default function App() {
     setCancelling(false);
 
     try {
-      const params = { url: url.trim(), mode };
+      const params = { url: url.trim(), mode, cookieSession: useCookies ? cookieSession : null };
 
       if (mode === 'resolution') {
         params.resolution = resolution;
@@ -279,6 +327,13 @@ export default function App() {
 
       const { job_id } = await startDownload(params);
       setJob(job_id);
+      
+      // Cookies consumed by download; clear UI state
+      if (useCookies && cookieSession) {
+        setCookieSession(null);
+        setCookieFileName(null);
+        setUseCookies(false);
+      }
 
       subscribeProgress(job_id, (data) => {
         setProgress(data);
@@ -287,8 +342,8 @@ export default function App() {
           setError(data.error || 'Download failed.');
         }
       });
-    } catch {
-      setError('Backend unreachable. Make sure the API server is running.');
+    } catch (err) {
+      setError(err.message || 'Backend unreachable. Make sure the API server is running.');
     }
   };
 
@@ -313,8 +368,8 @@ export default function App() {
           setThumbDownloading(null);
         }
       });
-    } catch {
-      setError('Could not download thumbnail.');
+    } catch (err) {
+      setError(err.message || 'Could not download thumbnail.');
       setThumbDownloading(null);
     }
   };
@@ -514,23 +569,93 @@ export default function App() {
               </button>
             </div>
 
-            <div className="mt-3.5 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[11px] font-medium text-zinc-600 lg:justify-start lg:pl-1">
-              <span className="flex items-center gap-1.5">
-                <Check className="h-3 w-3 text-emerald-400" />
-                MP4 video
-              </span>
-              <span className="flex items-center gap-1.5">
-                <Check className="h-3 w-3 text-emerald-400" />
-                MP3 audio
-              </span>
-              <span className="flex items-center gap-1.5">
-                <Check className="h-3 w-3 text-emerald-400" />
-                Multiple resolutions
-              </span>
-              <span className="flex items-center gap-1.5">
-                <Check className="h-3 w-3 text-emerald-400" />
-                Thumbnail export
-              </span>
+            {/* ✅ COOKIE TOGGLE SECTION */}
+            <div className="mt-4 rounded-2xl border border-white/[0.06] bg-[#08080b] p-4 sm:p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition ${useCookies && cookieSession ? 'bg-amber-400/15 text-amber-300' : 'bg-white/[0.04] text-zinc-500'}`}>
+                    <Cookie className="h-[18px] w-[18px]" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-[13px] font-bold text-white">Use YouTube Cookies</h3>
+                      <span className="rounded border border-white/[0.06] bg-white/[0.03] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-zinc-500">
+                        Optional
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] leading-5 text-zinc-500">
+                      Bypass YouTube's "confirm you're not a bot" block for restricted videos.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Toggle switch */}
+                <button
+                  onClick={() => {
+                    if (useCookies) { handleClearCookies(); }
+                    else { cookieInputRef.current?.click(); }
+                  }}
+                  disabled={cookieUploading || !!job}
+                  className={`relative h-6 w-11 shrink-0 rounded-full p-0.5 transition ${useCookies && cookieSession ? 'bg-violet-500' : 'bg-white/[0.1]'} disabled:opacity-50`}
+                  aria-label="Toggle cookies"
+                >
+                  <span className={`block h-5 w-5 rounded-full bg-white shadow-md transition-transform duration-200 ${useCookies && cookieSession ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+
+              {/* Hidden file input */}
+              <input ref={cookieInputRef} type="file" accept=".txt,text/plain" onChange={handleCookieUpload} className="hidden" />
+
+              {/* Cookie status / upload area */}
+              {useCookies && !cookieSession && (
+                <button onClick={() => cookieInputRef.current?.click()} disabled={cookieUploading || !!job}
+                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-white/[0.08] bg-white/[0.015] p-4 text-[13px] font-medium text-zinc-400 transition hover:border-violet-400/30 hover:text-white disabled:opacity-50">
+                  {cookieUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                  {cookieUploading ? 'Loading cookies...' : 'Click to upload cookies.txt'}
+                </button>
+              )}
+
+              {cookieSession && (
+                <div className="mt-4 flex items-center justify-between rounded-xl border border-emerald-400/20 bg-emerald-400/[0.05] p-3">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-400" />
+                    <div className="min-w-0">
+                      <p className="flex items-center gap-1.5 text-[13px] font-medium text-emerald-200">
+                        <FileText className="h-3.5 w-3.5" />
+                        <span className="truncate">{cookieFileName}</span>
+                      </p>
+                      <p className="text-[11px] text-zinc-500">Loaded in memory • used once • auto-deleted</p>
+                    </div>
+                  </div>
+                  <button onClick={handleClearCookies} disabled={!!job} className="text-zinc-600 transition hover:text-red-300 disabled:opacity-50" title="Remove cookies">
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+
+              {/* Help accordion */}
+              <div className="mt-4 border-t border-white/[0.06] pt-3">
+                <button onClick={() => setShowCookieHelp(!showCookieHelp)} className="flex items-center gap-1 text-[11px] text-zinc-500 transition hover:text-zinc-300">
+                  {showCookieHelp ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                  How do I export my cookies?
+                </button>
+                {showCookieHelp && (
+                  <div className="mt-3 space-y-2 text-[12px] leading-relaxed text-zinc-400">
+                    <ol className="list-inside list-decimal space-y-1.5 pl-1">
+                      <li>Install the free browser extension <span className="font-medium text-violet-300">"Get cookies.txt LOCALLY"</span> (Chrome / Firefox / Edge).</li>
+                      <li>Open <span className="text-white">youtube.com</span> and make sure you're signed in.</li>
+                      <li>Click the extension icon → <span className="text-white">Export</span> → save the <span className="text-white">cookies.txt</span> file.</li>
+                      <li>Upload that file here using the toggle above.</li>
+                    </ol>
+                    <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-400/20 bg-amber-400/[0.05] p-2.5">
+                      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+                      <p className="text-amber-300/80">
+                        <span className="font-semibold">Privacy:</span> Your cookies grant full account access. They are kept in server memory only, used for a single request, then permanently deleted. Never upload cookies on a public/shared site — only use this on a tool you trust.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </section>
 
