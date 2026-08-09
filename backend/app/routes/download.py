@@ -2,11 +2,12 @@ import uuid
 import os
 import asyncio
 import json
+import re
 import threading
 from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, BackgroundTasks
-from fastapi.responses import StreamingResponse, FileResponse
-from pydantic import BaseModel, HttpUrl
+from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
+from pydantic import BaseModel, field_validator
 from enum import Enum
 from ..services.ytdlp_service import (
     JOB_STORE, fetch_info, cleanup_job, CancelledException,
@@ -17,6 +18,15 @@ import yt_dlp
 
 router = APIRouter(prefix="/api", tags=["download"])
 
+# Lenient YouTube URL pattern — clearer errors than Pydantic's strict HttpUrl
+YOUTUBE_PATTERN = re.compile(
+    r'^(https?://)?'
+    r'(www\.|m\.|music\.)?'
+    r'(youtube\.com/(watch|embed|shorts|v)|youtu\.be/)'
+    r'.+',
+    re.IGNORECASE
+)
+
 
 class Mode(str, Enum):
     BEST = "best"
@@ -26,22 +36,48 @@ class Mode(str, Enum):
 
 
 class DownloadReq(BaseModel):
-    url: HttpUrl
+    url: str
     mode: Mode = Mode.BEST
     resolution: int | None = None
 
+    @field_validator('url')
+    @classmethod
+    def validate_url(cls, v):
+        if not v or not isinstance(v, str):
+            raise ValueError('URL is required')
+        v = v.strip()
+        if not YOUTUBE_PATTERN.match(v):
+            raise ValueError('Please enter a valid YouTube URL (youtube.com/watch?v=... or youtu.be/...)')
+        if not v.startswith('http'):
+            v = 'https://' + v
+        return v
+
 
 class ThumbnailReq(BaseModel):
-    url: HttpUrl
-    thumbnail_url: HttpUrl
+    url: str
+    thumbnail_url: str
     original_quality: bool = True
+
+    @field_validator('url', 'thumbnail_url')
+    @classmethod
+    def validate_urls(cls, v):
+        if not v or not isinstance(v, str):
+            raise ValueError('URL is required')
+        return v.strip()
 
 
 @router.post("/video/info")
 async def video_info(req: DownloadReq):
-    info = fetch_info(str(req.url))
+    try:
+        info = fetch_info(req.url)
+    except Exception as e:
+        raise HTTPException(400, f"Failed to analyze video: {str(e)[:200]}")
+
     if not info:
-        raise HTTPException(400, "Could not fetch video info")
+        raise HTTPException(
+            400,
+            "Could not fetch video info. The video may be private, age-restricted, region-locked, or the URL is invalid."
+        )
 
     formats = info.get("formats", [])
     resolutions = sorted(
@@ -55,7 +91,6 @@ async def video_info(req: DownloadReq):
     thumbnails = info.get("thumbnails", [])
     thumb_urls = [t["url"] for t in thumbnails if t.get("url")]
 
-    # Channel / uploader metadata
     channel_id = info.get("channel_id") or info.get("uploader_id")
     channel_url = info.get("channel_url") or info.get("uploader_url")
 
@@ -64,8 +99,7 @@ async def video_info(req: DownloadReq):
     if not channel_logo and channel_id:
         channel_logo = f"https://yt3.googleusercontent.com/{channel_id}"
 
-    # Construct guaranteed original-quality thumbnail URL from video ID
-    video_id = extract_video_id(str(req.url))
+    video_id = extract_video_id(req.url)
     original_thumb_url = (
         f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg"
         if video_id else info.get("thumbnail")
@@ -73,7 +107,6 @@ async def video_info(req: DownloadReq):
 
     return {
         "success": True,
-        # Video metadata
         "title": info.get("title"),
         "description": info.get("description", ""),
         "tags": info.get("tags", []),
@@ -85,7 +118,6 @@ async def video_info(req: DownloadReq):
         "thumbnail": info.get("thumbnail"),
         "original_thumbnail": original_thumb_url,
         "thumbnails": thumb_urls,
-        # Channel metadata
         "uploader": info.get("uploader") or info.get("channel"),
         "channel_id": channel_id,
         "channel_url": channel_url,
@@ -93,7 +125,6 @@ async def video_info(req: DownloadReq):
         "channel_banner": info.get("channel_banner"),
         "channel_tags": info.get("channel_tags", []),
         "subscriber_count": info.get("channel_follower_count"),
-        # Format options
         "available_resolutions": resolutions,
         "has_audio": any(f.get("acodec") != "none" for f in formats),
     }
@@ -128,7 +159,7 @@ def run_download(job_id, req, job_dir):
             opts = opts_best(job_dir, 3, job_id)
 
         with yt_dlp.YoutubeDL(opts) as ydl:
-            ydl.download([str(req.url)])
+            ydl.download([req.url])
 
         if JOB_STORE[job_id]["cancel_event"].is_set():
             raise CancelledException("Cancelled during processing")
@@ -166,7 +197,6 @@ async def cancel_download(job_id: str):
 
 @router.post("/download/thumbnail")
 async def download_thumbnail(req: ThumbnailReq, bg: BackgroundTasks):
-    """Download thumbnail — defaults to TRUE ORIGINAL quality (maxresdefault)."""
     job_id = f"thumb-{str(uuid.uuid4())[:6]}"
     job_dir = f"/tmp/yt-dl/{job_id}"
     os.makedirs(job_dir, exist_ok=True)
@@ -181,10 +211,10 @@ async def download_thumbnail(req: ThumbnailReq, bg: BackgroundTasks):
     bg.add_task(
         run_thumbnail_download,
         job_id,
-        str(req.thumbnail_url),
+        req.thumbnail_url,
         job_dir,
         req.original_quality,
-        str(req.url),
+        req.url,
     )
     return {"job_id": job_id}
 
