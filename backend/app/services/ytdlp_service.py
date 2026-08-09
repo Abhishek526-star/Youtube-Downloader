@@ -177,14 +177,29 @@ def _cloud_headers_and_clients() -> dict:
 def fetch_info(url: str, cookies_text: Optional[str] = None) -> Tuple[Optional[dict], Optional[str]]:
     """
     Fetch metadata. Returns (info_dict, None) on success, (None, error_message) on failure.
-    If cookies_text is provided, uses it to bypass YouTube's bot wall.
+    
+    KEY LOGIC:
+    - WITH cookies: let yt-dlp use its default clients (cookies alone bypass the bot wall).
+      Forcing player_client here causes "Requested format is not available".
+    - WITHOUT cookies: force tv_embedded/ios clients to try bypassing the bot wall.
     """
     ydl_opts = {
         "quiet": True,
         "no_warnings": True,
         "retries": 5,
-        **_cloud_headers_and_clients(),
+        "socket_timeout": 30,
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+        },
     }
+
+    # Only force player clients when we have NO cookies
+    if not cookies_text:
+        ydl_opts["extractor_args"] = {
+            "youtube": {"player_client": ["tv_embedded", "ios", "android", "web"]},
+        }
+
     try:
         with CookieContext(cookies_text) as cookie_file:
             if cookie_file:
@@ -264,8 +279,8 @@ def download_thumbnail_to_job(
     return None
 
 
-def _common_opts(output_dir: str, retries: int, job_id: str) -> dict:
-    return {
+def _common_opts(output_dir: str, retries: int, job_id: str, has_cookies: bool = False) -> dict:
+    opts = {
         "outtmpl": os.path.join(output_dir, "%(title)s.%(ext)s"),
         "progress_hooks": [create_progress_hook(job_id)],
         "retries": retries,
@@ -274,12 +289,22 @@ def _common_opts(output_dir: str, retries: int, job_id: str) -> dict:
         "windowsfilenames": True,
         "quiet": True,
         "no_warnings": True,
-        **_cloud_headers_and_clients(),
+        "socket_timeout": 30,
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+        },
     }
+    # Only force player clients when NOT using cookies
+    if not has_cookies:
+        opts["extractor_args"] = {
+            "youtube": {"player_client": ["tv_embedded", "ios", "android", "web"]},
+        }
+    return opts
 
 
-def opts_best(output_dir, retries, job_id):
-    opts = _common_opts(output_dir, retries, job_id)
+def opts_best(output_dir, retries, job_id, has_cookies=False):
+    opts = _common_opts(output_dir, retries, job_id, has_cookies)
     opts.update({
         "format": "bestvideo+bestaudio/best",
         "merge_output_format": "mp4",
@@ -288,8 +313,8 @@ def opts_best(output_dir, retries, job_id):
     return opts
 
 
-def opts_audio(output_dir, retries, job_id):
-    opts = _common_opts(output_dir, retries, job_id)
+def opts_audio(output_dir, retries, job_id, has_cookies=False):
+    opts = _common_opts(output_dir, retries, job_id, has_cookies)
     opts.update({
         "format": "bestaudio/best",
         "postprocessors": [{
@@ -301,8 +326,8 @@ def opts_audio(output_dir, retries, job_id):
     return opts
 
 
-def opts_resolution(output_dir, resolution: str, retries, job_id):
-    opts = _common_opts(output_dir, retries, job_id)
+def opts_resolution(output_dir, resolution: str, retries, job_id, has_cookies=False):
+    opts = _common_opts(output_dir, retries, job_id, has_cookies)
     opts.update({
         "format": f"bestvideo[height<={resolution}]+bestaudio/best[height<={resolution}]",
         "merge_output_format": "mp4",
@@ -310,8 +335,8 @@ def opts_resolution(output_dir, resolution: str, retries, job_id):
     return opts
 
 
-def opts_keypad(output_dir, retries, job_id):
-    opts = _common_opts(output_dir, retries, job_id)
+def opts_keypad(output_dir, retries, job_id, has_cookies=False):
+    opts = _common_opts(output_dir, retries, job_id, has_cookies)
     opts.update({
         "format": "worstvideo[height<=144]+worstaudio/worst[height<=144]/worst",
         "merge_output_format": "3gp",

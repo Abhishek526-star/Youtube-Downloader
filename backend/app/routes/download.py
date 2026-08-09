@@ -257,20 +257,19 @@ async def start_download(
     bg.add_task(run_download, job_id, url, mode, resolution, job_dir)
     return {"job_id": job_id}
 
-
 def run_download(job_id, url, mode, resolution, job_dir):
     cookies_text = JOB_STORE[job_id].pop("_cookies_text", None)
+    has_cookies = cookies_text is not None
     try:
         if mode == Mode.AUDIO:
-            opts = opts_audio(job_dir, 3, job_id)
+            opts = opts_audio(job_dir, 3, job_id, has_cookies)
         elif mode == Mode.RESOLUTION and resolution:
-            opts = opts_resolution(job_dir, str(resolution), 3, job_id)
+            opts = opts_resolution(job_dir, str(resolution), 3, job_id, has_cookies)
         elif mode == Mode.KEYPAD:
-            opts = opts_keypad(job_dir, 3, job_id)
+            opts = opts_keypad(job_dir, 3, job_id, has_cookies)
         else:
-            opts = opts_best(job_dir, 3, job_id)
+            opts = opts_best(job_dir, 3, job_id, has_cookies)
 
-        # ✅ Use cookies via secure temp-file context (wiped after download)
         with CookieContext(cookies_text) as cookie_file:
             if cookie_file:
                 opts["cookiefile"] = cookie_file
